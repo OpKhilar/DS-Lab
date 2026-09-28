@@ -1,0 +1,63 @@
+-- ==========================================
+-- 001_trust_layer.sql
+-- Foundation Security & Auditing Layer
+-- ========================================== 
+
+-- 1. EXTENSIONS
+-- Enable secure UUID generation and cryptographic utilities
+create extension if not exists "uuid-ossp" with schema public;
+create extension if not exists "pgcrypto" with schema public; 
+
+-- 2. AUTOMATED TIMESTAMP UTILITIES
+-- Create a global trigger function to manage 'updated_at' columns automatically
+create or replace function public.set_current_timestamp_updated_at()
+returns trigger as 
+
+beginnew.updatedat=clocktimestamp();returnnew;end;b e g i n n e w point u p d a t e d sub a t equals c l o c k sub t i m e s t a m p open paren close paren ; r e t u r n n e w ; e n d ;
+𝑏𝑒𝑔𝑖𝑛𝑛𝑒𝑤.𝑢𝑝𝑑𝑎𝑡𝑒𝑑𝑎𝑡=𝑐𝑙𝑜𝑐𝑘𝑡𝑖𝑚𝑒𝑠𝑡𝑎𝑚𝑝();𝑟𝑒𝑡𝑢𝑟𝑛𝑛𝑒𝑤;𝑒𝑛𝑑;
+ language plpgsql security definer; 
+
+-- 3. CORE TABLES: USER PROFILES
+-- Create a secure public profile table linked to Supabase Auth
+create table public.profiles (
+id uuid references auth.users on delete cascade primary key,
+email text text_pattern_ops,
+full_name text,
+avatar_url text,
+created_at timestamp with time zone default clock_timestamp() not null,
+updated_at timestamp with time zone default clock_timestamp() not null
+); 
+
+-- Protect profiles from unauthorized modification
+alter table public.profiles enable row level security; 
+
+-- 4. ROW LEVEL SECURITY (RLS) POLICIES
+-- Profiles: Users can view any profile, but only modify their own
+create policy "Allow public read access to profiles"
+on public.profiles for select
+using (true); 
+
+create policy "Allow individual write access to own profile"
+on public.profiles for update
+using (auth.uid() = id)
+with check (auth.uid() = id); 
+
+-- 5. AUTOMATED PROFILES PROVISIONING
+-- Automatically create a public profile whenever a new user registers in Supabase Auth
+create or replace function public.handle_new_user_registration()
+returns trigger as 
+
+begininsertintopublic.profiles(id,email,fullname,avatarurl)values(new.id,new.email,coalesce(new.rawusermetadata−>>′fullname′,new.rawusermetadata−>>′name′),new.rawusermetadata−>>′avatarurl′);returnnew;end;b e g i n i n s e r t i n t o p u b l i c point p r o f i l e s open paren i d comma e m a i l comma f u l l sub n a m e comma a v a t a r sub u r l close paren v a l u e s open paren n e w point i d comma n e w point e m a i l comma c o a l e s c e open paren n e w point r a w sub u s e r sub m e t a sub d a t a minus is greater than is greater than prime f u l l sub n a m e prime comma n e w point r a w sub u s e r sub m e t a sub d a t a minus is greater than is greater than prime n a m e prime close paren comma n e w point r a w sub u s e r sub m e t a sub d a t a minus is greater than is greater than prime a v a t a r sub u r l prime close paren ; r e t u r n n e w ; e n d ;
+𝑏𝑒𝑔𝑖𝑛𝑖𝑛𝑠𝑒𝑟𝑡𝑖𝑛𝑡𝑜𝑝𝑢𝑏𝑙𝑖𝑐.𝑝𝑟𝑜𝑓𝑖𝑙𝑒𝑠(𝑖𝑑,𝑒𝑚𝑎𝑖𝑙,𝑓𝑢𝑙𝑙𝑛𝑎𝑚𝑒,𝑎𝑣𝑎𝑡𝑎𝑟𝑢𝑟𝑙)𝑣𝑎𝑙𝑢𝑒𝑠(𝑛𝑒𝑤.𝑖𝑑,𝑛𝑒𝑤.𝑒𝑚𝑎𝑖𝑙,𝑐𝑜𝑎𝑙𝑒𝑠𝑐𝑒(𝑛𝑒𝑤.𝑟𝑎𝑤𝑢𝑠𝑒𝑟𝑚𝑒𝑡𝑎𝑑𝑎𝑡𝑎−>>′𝑓𝑢𝑙𝑙𝑛𝑎𝑚𝑒′,𝑛𝑒𝑤.𝑟𝑎𝑤𝑢𝑠𝑒𝑟𝑚𝑒𝑡𝑎𝑑𝑎𝑡𝑎−>>′𝑛𝑎𝑚𝑒′),𝑛𝑒𝑤.𝑟𝑎𝑤𝑢𝑠𝑒𝑟𝑚𝑒𝑡𝑎𝑑𝑎𝑡𝑎−>>′𝑎𝑣𝑎𝑡𝑎𝑟𝑢𝑟𝑙′);𝑟𝑒𝑡𝑢𝑟𝑛𝑛𝑒𝑤;𝑒𝑛𝑑;
+ language plpgsql security definer; 
+
+-- Attach the registration function to the auth.users table via a trigger
+create or replace trigger on_auth_user_created
+after insert on auth.users
+for each row execute procedure public.handle_new_user_registration(); 
+
+-- 6. APPLICATION OF TIMESTAMPS
+-- Attach the auto-updating timestamp trigger to the profiles table
+create trigger handle_profiles_updated_at
+before update on public.profiles
+for each row execute procedure public.set_current_timestamp_updated_at();
